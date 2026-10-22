@@ -47,6 +47,6 @@ Python 3.x (No external third-party libraries required; uses only standard Pytho
 Clone the repository and run the script with Python:
 
 ```bash
-git clone [https://github.com/YOUR_USERNAME/YOUR_REPOSITORY_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY_NAME.git)
-cd YOUR_REPOSITORY_NAME
+https://github.com/cri3is/cricob.git
+cd cricob
 python cricob.py -h
