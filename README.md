@@ -26,6 +26,7 @@ python cricob.py -p ?dadmin?s
 Example:
 
 python cricob.py 4 4 123456890
+
 pythoh cricob.py 1 3 Abc123
 
 -Smart Deduplication & Safety Checks: Automatically filters out duplicate entries and prompts a warning if the estimated combination count exceeds 500,000 to prevent accidental system overload.
