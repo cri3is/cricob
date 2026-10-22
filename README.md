@@ -48,6 +48,6 @@ Python 3.x (No external third-party libraries required; uses only standard Pytho
 Clone the repository and run the script with Python:
 
 ```bash
-https://github.com/cri3is/cricob.git
+git clone https://github.com/cri3is/cricob.git
 cd cricob
 python cricob.py -h
