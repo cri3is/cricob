@@ -51,3 +51,16 @@ Clone the repository and run the script with Python:
 git clone https://github.com/cri3is/cricob.git
 cd cricob
 python cricob.py -h
+````
+
+⚠️ Disclaimer
+
+This tool is intended for authorized security testing, self-auditing, and
+educational use only. Run it solely against systems you own or have explicit
+written permission to test.
+
+Using it for unauthorized access or password cracking is illegal and may result
+in criminal or civil liability under your local laws.
+
+Licensed under GPL v3 and provided "as is", without warranty of any kind.
+You are solely responsible for how you use it.
