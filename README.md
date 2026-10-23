@@ -15,7 +15,7 @@ Example:
 
 python cricob.py -i
 
--Pattern Mode (-p/--pattern): Generates wordlists using custom masks ('?d', '?l', '?u', '?s'). Where '?d': 1-9; '?l': a-z; '?u': A-Z; ?s: !@#$%^&*
+-Pattern Mode (-p/--pattern): Generates wordlists using custom masks ('?d', '?l', '?u', '?s'). Where '?d': 0-9; '?l': a-z; '?u': A-Z; ?s: !@#$%^&*
 
 Example:
 
@@ -27,7 +27,7 @@ Example:
 
 python cricob.py 4 4 123456890
 
-pythoh cricob.py 1 3 Abc123
+python cricob.py 1 3 Abc123
 
 -Smart Deduplication & Safety Checks: Automatically filters out duplicate entries and prompts a warning if the estimated combination count exceeds 500,000 to prevent accidental system overload.
 
