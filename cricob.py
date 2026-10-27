@@ -41,16 +41,38 @@ mask_map = {
 	"?s": "!@#$%^&*",
 }
 
-seen = set()
 output_file = open(args.output, "w", encoding="utf-8") if args.output else None
 
-def unique_print(text):
-	if text not in seen:
-		seen.add(text)
-		if output_file:
-			output_file.write(text + "\n")
+MAX_DEDUP_ENTRIES = 2_000_000
+
+seen_hashes = set()
+written_count = 0
+duplicate_count = 0
+dedup_disabled = False
+
+def unique_print(text, dedup=True):
+	global dedup_disabled, written_count, duplicate_count
+
+	if dedup and not dedup_disabled:
+		key = hash(text)
+		if key in seen_hashes:
+			duplicate_count += 1
+			return
+		if len(seen_hashes) >= MAX_DEDUP_ENTRIES:
+			dedup_disabled = True
+			print(f"\n[!] Dedup limit reached ({MAX_DEDUP_ENTRIES}). Duplicates are no longer filtered.", file=sys.stderr)
 		else:
-			print(text)
+			seen_hashes.add(key)
+
+	written_count += 1
+	if written_count % 1_000_000 == 0:
+		print(f"[+] {written_count} lines generated...", file=sys.stderr)
+
+
+	if output_file:
+		output_file.write(text + '\n')
+	else:
+		print(text)
 
 def pattern_func(pattern_str):
 	options = []
@@ -136,38 +158,43 @@ if args.interactive:
 	user_company_name = input("Company name: ")
 	user_pet_name = input("Pet name: ")
 
-	while True:
-		user_birthday = input("Birthday (DD.MM.YYYY): ").strip()
+	BIRTHDAY_FORMATS = ("%d.%m.%Y", "%d%m%Y", "%Y")
 
-		if not user_birthday:
-			user_birthday_dot = ""
-			user_birthday_clean = ""
-			user_birthday_year = ""
-			user_birthday_day_month_dot = ""
-			user_birthday_day_month = ""
+	user_birthday_dot = ""
+	user_birthday_clean = ""
+	user_birthday_year = ""
+	user_birthday_day_month_dot = ""
+	user_birthday_day_month = ""
+
+	while True:
+		raw_birthday = input("Birthday: (DD.MM.YYYY): ").strip()
+
+		if not raw_birthday:
 			break
 
 		parsed_data = None
-			
-		try:
-			parsed_data = datetime.strptime(user_birthday, "%d.%m.%Y")
-		except ValueError:
-			try:
-				parsed_data = datetime.strptime(user_birthday, "%d%m%Y")
-			except ValueError:
-				try:
-					parsed_data = datetime.strptime(user_birthday, "%Y")
-				except ValueError:
-					print("[!] Wrong birthday format. Use DD.MM.YYYY (DDMMYYYY; YYYY)")
-					continue
+		matched_format = None
 
-		user_birthday_dot = parsed_data.strftime("%d.%m.%Y")
-		user_birthday_clean = parsed_data.strftime("%d%m%Y")
+		for format in BIRTHDAY_FORMATS:
+			try:
+				parsed_data = datetime.strptime(raw_birthday, format)
+				matched_format = format
+				break
+			except ValueError:
+				continue
+		if matched_format is None:
+			print("[!] Wrong birthday format. Use DD.MM.YYYY (DDMMYYYY; YYYY)")
+			continue
+
 		user_birthday_year = parsed_data.strftime("%Y")
-		user_birthday_day_month_dot = parsed_data.strftime("%d.%m")
-		user_birthday_day_month = parsed_data.strftime("%d%m")
+
+		if matched_format in ("%d.%m.%Y", "%d%m%Y"):
+			user_birthday_dot = parsed_data.strftime("%d.%m.%Y")
+			user_birthday_clean = parsed_data.strftime("%d%m%Y")
+			user_birthday_day_month_dot = parsed_data.strftime("%d.%m")	
+			user_birthday_day_month = parsed_data.strftime("%d%m")
+
 		break
-	
 
 	while True:
 		user_favourite_number = input("Favourite number: ")
@@ -229,7 +256,7 @@ if args.interactive:
 	for combination in itertools.product(items_for_leet, repeat=2):
 		combinations_for_leet.append("".join(combination))
 
-	if user_name and user_birthday:
+	if user_name and user_birthday_year:
 		for symbol in special_symbols:
 			unique_print(f"{user_name}{user_birthday_year}{symbol}")
 
