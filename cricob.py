@@ -3,7 +3,14 @@ import itertools
 import string
 import sys
 import math
+import re
 from datetime import datetime
+import signal
+
+EXIT_OK = 0
+EXIT_CANCELLED = 1
+EXIT_USAGE = 2
+EXIT_INTERRUPTED = 130
 
 parser = argparse.ArgumentParser(description="Wordlist Generator, with interactive and default modes")
 
@@ -19,20 +26,52 @@ args = parser.parse_args()
 
 if len(sys.argv) == 1:
 	parser.print_help()
-	sys.exit()
+	sys.exit(EXIT_OK)
 
-non_mode_args = {"output", "min_len", "max_len", "base_chars"}
-active_modes = [
-	value for key, value in vars(args).items()
-	if key not in non_mode_args and value
+selected_modes = []
+
+if args.interactive:
+	selected_modes.append("interactive (-i)")
+
+if args.pattern:
+	selected_modes.append("pattern (-p)")
+
+custom_range_args = [
+	args.min_len is not None,
+	args.max_len is not None,
+	args.base_chars is not None,
 ]
 
-custom_range_mode = args.min_len is not None and args.max_len is not None and args.base_chars is not None
+if any(custom_range_args) and not all(custom_range_args):
+	print("[!] Error: custom range mode needs all three values: min_len max_len base_chars", file=sys.stderr)
+	print("    Example: python cricob.py 1 3 abc", file=sys.stderr)
+	sys.exit(EXIT_USAGE)
 
-if not active_modes and not custom_range_mode:
-	print("[!] Error: No operational mode selected.\n")
+custom_range_mode = all(custom_range_args)
+
+if custom_range_mode:
+	selected_modes.append("custom range")
+
+if not selected_modes:
+	print("[!] Error: No operational modes selected.\n", file=sys.stderr)
 	parser.print_help()
-	sys.exit()
+	sys.exit(EXIT_USAGE)
+
+if len(selected_modes) > 1:
+	print(f"[!] Error: modes cannot be combined, got {', '.join(selected_modes)}", file=sys.stderr)
+	print("    Choose exactly one of: -i, -p or positional 'min_len max_len base_chars'.", file=sys.stderr)
+	sys.exit(EXIT_USAGE)
+
+if custom_range_mode:
+	if args.min_len < 0:
+		print("[!] Error: min_len cannot be negative", file=sys.stderr)
+		sys.exit(EXIT_USAGE)
+	if args.min_len > args.max_len:
+		print("[!] Error: min_len cannot be greater than max_len", file=sys.stderr)
+		sys.exit(EXIT_USAGE)
+	if not args.base_chars:
+		print("[!] Error: base_chars cannot be empty", file=sys.stderr)
+		sys.exit(EXIT_USAGE)
 
 mask_map = {
 	"?d": string.digits, #0-9
@@ -41,7 +80,45 @@ mask_map = {
 	"?s": "!@#$%^&*",
 }
 
-output_file = open(args.output, "w", encoding="utf-8") if args.output else None
+output_file = None
+
+def open_output():
+	global output_file
+
+	if output_file is not None or not args.output:
+		return output_file
+
+	try:
+		output_file = open(args.output, "w", encoding="utf-8", newline="\n")
+	except OSError as error:
+		print(f"[!] Cannot create output file '{args.output}': {error}", file=sys.stderr)
+		sys.exit(EXIT_USAGE)
+
+	return output_file
+
+def finish(code):
+	if output_file:
+		try:
+			output_file.close()
+		except OSError:
+			pass
+	sys.exit(code)
+
+def ask(prompt):
+	try:
+		return input(prompt)
+	except EOFError:
+		print("\n[!] Input closed (EOF), exiting.", file=sys.stderr)
+		finish(EXIT_INTERRUPTED)
+	except KeyboardInterrupt:
+		print("\n[-] Interrupted by user.", file=sys.stderr)
+		finish(EXIT_INTERRUPTED)
+
+def handle_interrupt(signum, frame):
+	print("\n[-] Interrupted by user.", file=sys.stderr)
+	finish(EXIT_INTERRUPTED)
+
+signal.signal(signal.SIGINT, handle_interrupt)
 
 MAX_DEDUP_ENTRIES = 2_000_000
 
@@ -66,13 +143,19 @@ def unique_print(text, dedup=True):
 
 	written_count += 1
 	if written_count % 1_000_000 == 0:
-		print(f"[+] {written_count} lines generated...", file=sys.stderr)
+		print(f"[*] {written_count} lines generated...", file=sys.stderr)
 
+
+	if args.output and output_file is None:
+		open_output()
 
 	if output_file:
-		output_file.write(text + '\n')
+		output_file.write(text + "\n")
 	else:
-		print(text)
+		try:
+			print(text)
+		except BrokenPipeError:
+			finish(EXIT_OK)
 
 def pattern_func(pattern_str):
 	options = []
@@ -91,12 +174,11 @@ def pattern_func(pattern_str):
 def confirm_generation(estimated_count):
 	print(f"\n[?] Warning! Estimated combinations count: ~{estimated_count}")
 	if estimated_count > 500000:
-		choice = input("[!] Generation count is above 500 000. Do you want to continue? (y/n): ").strip().lower()
+		choice = ask("[!] Generation count is above 500 000. Do you want to continue? (y/n): ").strip().lower()
 		if choice != "y":
 			print("[-] Operation is canceled by user")
-			if output_file:
-				output_file.close()
-			sys.exit(0)
+			finish(EXIT_CANCELLED)
+
 
 if custom_range_mode:
 	print(f"[+] Custom range mode: length from {args.min_len} to {args.max_len} using '{args.base_chars}'\n")
@@ -114,7 +196,7 @@ if args.pattern:
 	if isinstance(args.pattern, str):
 		user_pattern_input = args.pattern
 	else:
-		user_pattern_input = input("Type pattern (example: ?uadmin?s): ").strip()
+		user_pattern_input = ask("Type pattern (example: ?uadmin?s): ").strip()
 
 	print(f"[+] Using pattern: {user_pattern_input}\n")
 
@@ -131,7 +213,7 @@ if args.interactive:
 	print("Interactive mode\n")
 
 	while True:
-		user_name = input("Name: ").strip()
+		user_name = ask("Name: ").strip()
 
 		if not user_name:
 			break
@@ -143,7 +225,7 @@ if args.interactive:
 		break
 
 	while True:
-		user_surname = input("Surname: ")
+		user_surname = ask("Surname: ")
 
 		if not user_surname:
 			break
@@ -154,11 +236,18 @@ if args.interactive:
 
 		break
 
-	user_username = input("Username: ")
-	user_company_name = input("Company name: ")
-	user_pet_name = input("Pet name: ")
+	user_username = ask("Username: ")
+	user_company_name = ask("Company name: ")
+	user_pet_name = ask("Pet name: ")
 
-	BIRTHDAY_FORMATS = ("%d.%m.%Y", "%d%m%Y", "%Y")
+	BIRTHDAY_PATTERNS = (
+		re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$"),
+		re.compile(r"^(\d{2})(\d{2})(\d{4})$"),
+		re.compile(r"^(\d{4})$"),
+	)
+
+	MIN_BIRTHDAY_YEAR = 1900
+	MAX_BIRTHDAY_YEAR = datetime.now().year
 
 	user_birthday_dot = ""
 	user_birthday_clean = ""
@@ -167,37 +256,52 @@ if args.interactive:
 	user_birthday_day_month = ""
 
 	while True:
-		raw_birthday = input("Birthday: (DD.MM.YYYY): ").strip()
+		raw_birthday = ask("Birthday (DD.MM.YYYY): ").strip()
 
 		if not raw_birthday:
 			break
 
-		parsed_data = None
-		matched_format = None
-
-		for format in BIRTHDAY_FORMATS:
-			try:
-				parsed_data = datetime.strptime(raw_birthday, format)
-				matched_format = format
+		match = None
+		for pattern in BIRTHDAY_PATTERNS:
+			match = pattern.match(raw_birthday)
+			if match:
 				break
-			except ValueError:
-				continue
-		if matched_format is None:
-			print("[!] Wrong birthday format. Use DD.MM.YYYY (DDMMYYYY; YYYY)")
+
+		if match is None:
+			print("[!] Wrong birthday format. Use DD.MM.YYYY, DDMMYYYY or YYYY")
 			continue
 
+		groups = match.groups()
+
+		if len(groups) == 1:
+			year = int(groups[0])
+			if not (MIN_BIRTHDAY_YEAR <= year <= MAX_BIRTHDAY_YEAR):
+				print(f"[!] Year must be between {MIN_BIRTHDAY_YEAR} and {MAX_BIRTHDAY_YEAR}")
+				continue
+			user_birthday_year = f"{year:04d}"
+			break
+
+		day, month, year = int(groups[0]), int(groups[1]), int(groups[2])
+
+		if not (MIN_BIRTHDAY_YEAR <= year <= MAX_BIRTHDAY_YEAR):
+			print(f"[!] Year must be between {MIN_BIRTHDAY_YEAR} and {MAX_BIRTHDAY_YEAR}")
+			continue
+
+		try:
+			parsed_data = datetime(year, month, day)
+		except ValueError:
+			print("[!] This data does not exist (check day and month)")
+			continue
+
+		user_birthday_dot = parsed_data.strftime("%d.%m.%Y")
+		user_birthday_clean = parsed_data.strftime("%d%m%Y")
 		user_birthday_year = parsed_data.strftime("%Y")
-
-		if matched_format in ("%d.%m.%Y", "%d%m%Y"):
-			user_birthday_dot = parsed_data.strftime("%d.%m.%Y")
-			user_birthday_clean = parsed_data.strftime("%d%m%Y")
-			user_birthday_day_month_dot = parsed_data.strftime("%d.%m")	
-			user_birthday_day_month = parsed_data.strftime("%d%m")
-
+		user_birthday_day_month_dot = parsed_data.strftime("%d.%m")
+		user_birthday_day_month = parsed_data.strftime("%d%m")
 		break
 
 	while True:
-		user_favourite_number = input("Favourite number: ")
+		user_favourite_number = ask("Favourite number: ")
 
 		if not user_favourite_number:
 			break
@@ -208,7 +312,7 @@ if args.interactive:
 
 		break
 
-	leet_mode = input("Enable leet mode? (yes/no): ").strip().lower()
+	leet_mode = ask("Enable leet mode? (yes/no): ").strip().lower()
 
 	print()
 
@@ -223,38 +327,69 @@ if args.interactive:
 	items = base_items + birthday_items
 	items_for_leet = base_items + birthday_items_without_full_birthday
 
-	years = [year for year in range(1950, 2027)]
+	years = list(range(1950, datetime.now().year + 1))
 	special_symbols = ["!", "@", "$", "%", "^", "&", "*"]
-	years_count = len(range(1950, 2027))
-	symbols_count = 7
+
+	years_count = len(years)
+	symbols_count = len(special_symbols)
+	birthday_count = len(birthday_items)
+
+	leet_map = {
+		'a': ['a', '@', '4'],
+		'e': ['e', '3'],
+		'i': ['i', '1', '!'],
+		'o': ['o', '0', '()'],
+		's': ['s', '$', '5'],
+		't': ['t', '7'],
+		'b': ['b', '8'],
+		'g': ['g', '9'],
+		'z': ['z', '2'],
+		'l': ['l', '1'],
+		'1': ['1', '!', 'i', 'l', '|'],
+		'2': ['2', '@'],
+		'3': ['3', 's', 'e'],
+		'4': ['4', '$'],
+		'5': ['5', '%'],
+	}
+
+	def leet_variations_count(word):
+		count = 1
+		for char in word:
+			options = leet_map.get(char.lower())
+			if options:
+				count *= len(options)
+		return count
+
+	combinations = ["".join(pair) for pair in itertools.product(items, repeat=2)]
+	combinations_for_leet = ["".join(pair) for pair in itertools.product(items_for_leet, repeat=2)]
 
 	estimated_variations = (
-		len(items) +
-		(len(items) ** 2) +
-		(len(items) * years_count * 2) +
-		(len(items) * symbols_count) +
-		(len(items)**2 * years_count * 2) +
-		(len(items)**2 * symbols_count)
+		len(items)
+		+ len(combinations)
+		+ len(items) * years_count * 2
+		+ len(combinations) * years_count * 2
+		+ len(combinations) * symbols_count 
 	)
 
+	if user_name and user_birthday_year:
+		estimated_variations += symbols_count
+
+	if user_name and birthday_items:
+		estimated_variations += 3 * birthday_count
+
+	estimated_variations += 2 * birthday_count * symbols_count
+
 	if leet_mode == "yes":
-		leet_count = len(base_items) + (len(items) ** 2)
-		estimated_variations += leet_count * 4
+		estimated_variations += sum(
+			leet_variations_count(word) for word in base_items + combinations_for_leet
+		)
 
 	confirm_generation(estimated_variations)
 	print()
 
-	combinations = []
-	combinations_for_leet = []
-
 	for item in items:
 		unique_print(item)
 
-	for combination in itertools.product(items, repeat=2):
-		combinations.append("".join(combination))
-
-	for combination in itertools.product(items_for_leet, repeat=2):
-		combinations_for_leet.append("".join(combination))
 
 	if user_name and user_birthday_year:
 		for symbol in special_symbols:
@@ -300,24 +435,6 @@ if args.interactive:
 			unique_print(words_symbols)
 
 	if leet_mode == "yes":
-		leet_map = {
-			'a': ['a', '@', '4'],
-			'e': ['e', '3'],
-			'i': ['i', '1', '!'],
-			'o': ['o', '0', '()'],
-			's': ['s', '$', '5'],
-			't': ['t', '7'],
-			'b': ['b', '8'],
-			'g': ['g', '9'],
-			'z': ['z', '2'],
-			'l': ['l', '1'],
-			'1': ['1', '!', 'i', 'l', '|'],
-			'2': ['2', '@'],
-			'3': ['3', 's', 'e'],
-			'4': ['4', '$'],
-			'5': ['5', '%'],
-		}
-
 		for word in base_items + combinations_for_leet:
 			options = []
 			for char in word:
@@ -332,4 +449,4 @@ if args.interactive:
 
 if output_file:
 	output_file.close()
-	print(f"\n[+] Wordlist successfully saved to {args.output}. Total unique combinations: {len(seen)}")
+	print(f"\n[+] Wordlist saved to {args.output}. Total lines: {written_count} (duplicates skipped: {duplicate_count})")
